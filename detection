@@ -1,0 +1,535 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision.models as models
+from torchvision.ops import FeaturePyramidNetwork, RoIAlign # قد تحتاج لـ RoIAlign مخصص لـ OBB
+# Placeholder for external or custom libraries/functions
+from typing import List, Tuple, Dict
+
+# --- Placeholder Functions (Need Implementation) ---
+
+def generate_horizontal_anchors(feature_map_sizes: List[Tuple[int, int]],
+                                scales: List[float],
+                                aspect_ratios: List[float],
+                                device: torch.device) -> List[torch.Tensor]:
+    """Generates standard horizontal anchors for FPN levels."""
+    # Implement standard anchor generation based on scales/ratios
+    # **ADJUST SCALES AND ASPECT_RATIOS FOR PALM DISEASES HERE**
+    # Example: scales=[32, 64, 128, 256, 512], aspect_ratios=[0.5, 1.0, 2.0, 1/3.0, 3.0, 1/5.0, 5.0]
+    print("Placeholder: generate_horizontal_anchors")
+    # Returns a list of anchor tensors per FPN level [N_anchors, 4] (x1, y1, x2, y2)
+    pass
+
+def skew_iou(obbs1: torch.Tensor, obbs2: torch.Tensor) -> torch.Tensor:
+    """Calculates Skewed IoU between two sets of oriented bounding boxes."""
+    # This is complex geometric calculation, likely needs a library or custom implementation
+    # Input: tensors of shape [N, 5] or [M, 5] where each row is (cx, cy, w, h, theta)
+    # Output: tensor of shape [N, M] with pairwise Skew IoU values
+    print("Placeholder: skew_iou")
+    # Return dummy values for structure
+    if obbs1.shape[0] == 0 or obbs2.shape[0] == 0:
+      return torch.zeros((obbs1.shape[0], obbs2.shape[0]), device=obbs1.device)
+    return torch.rand((obbs1.shape[0], obbs2.shape[0]), device=obbs1.device) * 0.5 # Dummy
+
+def horizontal_bbox_of_obb(obbs: torch.Tensor) -> torch.Tensor:
+    """Calculates the axis-aligned bounding box enclosing oriented boxes."""
+    # Geometric calculation to find min/max x/y of rotated box corners
+    print("Placeholder: horizontal_bbox_of_obb")
+    # Input: [N, 5] (cx, cy, w, h, theta)
+    # Output: [N, 4] (x1, y1, x2, y2)
+    # Return dummy values
+    if obbs.shape[0] == 0:
+      return torch.zeros((0, 4), device=obbs.device)
+    cx, cy, w, h, _ = obbs.unbind(dim=-1)
+    dummy_x1 = cx - w/2
+    dummy_y1 = cy - h/2
+    dummy_x2 = cx + w/2
+    dummy_y2 = cy + h/2
+    return torch.stack([dummy_x1, dummy_y1, dummy_x2, dummy_y2], dim=-1)
+
+
+def iou_horizontal(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
+    """Calculates standard horizontal IoU."""
+    # Standard IoU implementation
+    print("Placeholder: iou_horizontal")
+    # Return dummy values
+    if boxes1.shape[0] == 0 or boxes2.shape[0] == 0:
+      return torch.zeros((boxes1.shape[0], boxes2.shape[0]), device=boxes1.device)
+    return torch.rand((boxes1.shape[0], boxes2.shape[0]), device=boxes1.device) * 0.5 # Dummy
+
+def encode_obb_deltas(anchors_or_proposals: torch.Tensor, gt_obbs: torch.Tensor) -> torch.Tensor:
+    """Encodes ground truth OBBs relative to anchors/proposals (5 params)."""
+    # Implement Eq 6.1 (log-space for w, h)
+    print("Placeholder: encode_obb_deltas")
+    # Input anchors/proposals: [N, 4] (horiz) or [N, 5] (oriented)
+    # Input gt_obbs: [N, 5]
+    # Output: [N, 5] (tx, ty, tw, th, t_theta)
+    return torch.randn((gt_obbs.shape[0], 5), device=gt_obbs.device) # Dummy
+
+def decode_obb_deltas(anchors_or_proposals: torch.Tensor, deltas: torch.Tensor) -> torch.Tensor:
+    """Applies deltas to anchors/proposals to get predicted OBBs."""
+    # Implement inverse of Eq 6.1
+    print("Placeholder: decode_obb_deltas")
+    # Input anchors/proposals: [N, 4] (horiz) or [N, 5] (oriented)
+    # Input deltas: [N, 5]
+    # Output: [N, 5] predicted obbs (cx, cy, w, h, theta)
+    if anchors_or_proposals.shape[0] == 0:
+      return torch.zeros((0, 5), device=anchors_or_proposals.device)
+    # Dummy decoding (just adds noise for structure)
+    if anchors_or_proposals.shape[1] == 4: # Decoding from horizontal anchor
+        x1, y1, x2, y2 = anchors_or_proposals.unbind(dim=-1)
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
+        w = x2 - x1
+        h = y2 - y1
+        theta = torch.zeros_like(cx)
+        base_obb = torch.stack([cx, cy, w, h, theta], dim=-1)
+    else: # Decoding from oriented proposal
+        base_obb = anchors_or_proposals
+
+    return base_obb + deltas * 0.1 # Very basic dummy addition
+
+def obb_nms(obbs: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
+    """Performs Non-Maximum Suppression using Skew IoU."""
+    # Implement NMS using skew_iou for overlap check
+    print("Placeholder: obb_nms")
+    # Returns indices of boxes to keep
+    return torch.arange(obbs.shape[0])[:min(100, obbs.shape[0])] # Keep top 100 dummy
+
+
+# --- Model Components ---
+
+class DetectionHead(nn.Module):
+    """Shared head for classification and OBB regression."""
+    def __init__(self, in_channels, num_anchors, num_classes, num_obb_params=5):
+        super().__init__()
+        self.num_classes = num_classes
+        self.num_obb_params = num_obb_params
+
+        # Shared conv layers (typical in RetinaNet)
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            # Add more layers if needed
+        )
+        # Classification subnet
+        self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, stride=1, padding=1)
+        # OBB Regression subnet
+        self.obb_pred = nn.Conv2d(in_channels, num_anchors * num_obb_params, kernel_size=3, stride=1, padding=1)
+
+        # Initialize weights (important for training stability)
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.normal_(layer.weight, std=0.01)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+        # Bias initialization for classification (helps convergence)
+        # nn.init.constant_(self.cls_logits.bias, -math.log((1 - 0.01) / 0.01)) # Example bias init
+
+    def forward(self, features: List[torch.Tensor]) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+        cls_outputs = []
+        obb_outputs = []
+        for x in features:
+            shared_features = self.conv(x)
+            cls_out = self.cls_logits(shared_features)
+            obb_out = self.obb_pred(shared_features)
+
+            # Reshape outputs
+            # cls_out: [B, C*A, H, W] -> [B, H*W*A, C]
+            B, _, H, W = cls_out.shape
+            cls_out = cls_out.permute(0, 2, 3, 1).contiguous().view(B, -1, self.num_classes)
+            # obb_out: [B, 5*A, H, W] -> [B, H*W*A, 5]
+            obb_out = obb_out.permute(0, 2, 3, 1).contiguous().view(B, -1, self.num_obb_params)
+
+            cls_outputs.append(cls_out)
+            obb_outputs.append(obb_out)
+
+        # Concatenate across levels if needed, or return list
+        return cls_outputs, obb_outputs
+
+
+class FeatureRefinementModule(nn.Module):
+    """Implements FRM for feature alignment (Conceptual)."""
+    def __init__(self, fpn_out_channels):
+        super().__init__()
+        # Layers for feature fusion (Eq 6.5 in chapter seems to describe loss, not FRM structure)
+        # Based on Fig 6.5 / 6.6: Parallel paths + reconstruction
+        self.vert_conv = nn.Conv2d(fpn_out_channels, fpn_out_channels, kernel_size=(5, 1), padding=(2, 0))
+        self.horiz_conv = nn.Conv2d(fpn_out_channels, fpn_out_channels, kernel_size=(1, 5), padding=(0, 2))
+        self.point_conv = nn.Conv2d(fpn_out_channels, fpn_out_channels, kernel_size=1)
+
+        # Layers for feature reconstruction/final fusion (details might vary)
+        self.reconstruction_conv = nn.Conv2d(fpn_out_channels * 2, fpn_out_channels, kernel_size=1) # Example
+        self.output_align_size = 7 # Example output size for aligned features
+
+    def forward(self, fpn_features_f1: torch.Tensor,
+                coarse_pred_obbs: torch.Tensor,
+                batch_indices: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            fpn_features_f1 (Tensor): Feature map from FPN (e.g., P3 level).
+            coarse_pred_obbs (Tensor): Predicted oriented boxes [N_proposals, 5] (cx,cy,w,h,th).
+            batch_indices (Tensor): Tensor indicating which batch each proposal belongs to [N_proposals].
+
+        Returns:
+            refined_features (Tensor): Features aligned to the proposals.
+        """
+        # 1. Feature Fusion Path (creates F2' based on description/Fig 6.6)
+        f_vert = self.vert_conv(fpn_features_f1)
+        f_horiz = self.horiz_conv(fpn_features_f1)
+        f_point = self.point_conv(fpn_features_f1) # Or maybe this path comes later? Fig 6.6 unclear
+        fused_f2_prime = f_vert + f_horiz + f_point # Element-wise add (example fusion)
+
+        # 2. Feature Reconstruction Path
+        # Map OBBs to feature map coordinates and align features
+        # This is the core part - using RoIAlign adapted for OBBs or grid_sample
+        # `aligned_features_f2 = roi_align_oriented(fused_f2_prime, coarse_pred_obbs, batch_indices, output_size=self.output_align_size)`
+        # `aligned_features_f1 = roi_align_oriented(fpn_features_f1, coarse_pred_obbs, batch_indices, output_size=self.output_align_size)` # Align original features too
+
+        # Placeholder RoIAlign - uses horizontal boxes for structure demo
+        # NOTE: THIS IS THE WRONG WAY for OBBs, just for structure
+        horizontal_boxes = horizontal_bbox_of_obb(coarse_pred_obbs)
+        # Need to format boxes for roi_align: [batch_index, x1, y1, x2, y2]
+        roi_align_input_boxes = torch.cat([batch_indices.unsqueeze(1).float(), horizontal_boxes], dim=1)
+
+        # Align features from both F1 and F2'
+        # Spatial scale calculation depends on FPN level stride
+        spatial_scale = 1.0 / 8.0 # Example for P3 stride
+        aligned_features_f1 = RoIAlign((self.output_align_size, self.output_align_size), spatial_scale, sampling_ratio=-1)(fpn_features_f1, roi_align_input_boxes)
+        aligned_features_f2_prime = RoIAlign((self.output_align_size, self.output_align_size), spatial_scale, sampling_ratio=-1)(fused_f2_prime, roi_align_input_boxes)
+
+
+        # 3. Final Fusion (Create F3)
+        # Concatenate aligned features and pass through conv layer(s)
+        concatenated_features = torch.cat([aligned_features_f1, aligned_features_f2_prime], dim=1)
+        refined_features_f3 = self.reconstruction_conv(concatenated_features) # Final aligned features
+
+        print(f"Placeholder: FRM returning features of shape {refined_features_f3.shape}") # Shape like [N_proposals, C, align_size, align_size]
+        return refined_features_f3
+
+
+# --- Main Model ---
+
+class WDFNetPalm(nn.Module):
+    def __init__(self, num_classes, scales=None, aspect_ratios=None):
+        super().__init__()
+        self.num_classes = num_classes
+
+        # 1. Backbone
+        backbone = models.resnet50(pretrained=True) # Or resnet101
+        # Extract features from intermediate layers (typical for FPN)
+        self.body = nn.Sequential(*list(backbone.children())[:-2])
+        # Define output channels for FPN based on ResNet structure
+        # Example: C3=512, C4=1024, C5=2048
+        backbone_out_channels = [512, 1024, 2048] # Adjust based on actual layers used
+
+        # 2. FPN
+        fpn_out_channels = 256 # Standard FPN output channels
+        self.fpn = FeaturePyramidNetwork(backbone_out_channels, fpn_out_channels)
+        # FPN typically produces P3, P4, P5, P6, P7
+        self.num_fpn_levels = 5 # Adjust if FPN structure is different
+
+        # 3. Anchor Generator (Horizontal for Coarse Stage)
+        self.scales = scales or [32, 64, 128, 256, 512] # ** ADJUST FOR PALM **
+        self.aspect_ratios = aspect_ratios or [0.5, 1.0, 2.0, 1/3., 3.0] # ** ADJUST FOR PALM **
+        self.num_anchors_per_level = len(self.scales) * len(self.aspect_ratios) # This is not how RetinaNet does it, needs proper anchor generator
+        # self.anchor_generator = AnchorGenerator(...) # Use a proper generator
+
+        # 4. Coarse Stage Heads
+        self.coarse_head = DetectionHead(fpn_out_channels, self.num_anchors_per_level, num_classes)
+
+        # 5. Feature Refinement Module (FRM)
+        self.frm = FeatureRefinementModule(fpn_out_channels) # Assuming FRM runs on P3 output
+
+        # 6. Refine Stage Heads
+        # Input channels for refine head depends on FRM output processing
+        # If FRM output is pooled/flattened, channel size changes. Let's assume it uses pooled FRM features.
+        # Example: Assume RoI pooling after FRM -> Flatten -> FC layers for refine head
+        frm_pooled_size = fpn_out_channels * self.frm.output_align_size * self.frm.output_align_size
+        self.refine_fc = nn.Sequential(
+            nn.Linear(frm_pooled_size, 1024),
+            nn.ReLU(),
+            # nn.Linear(1024, 1024), # Optional extra layer
+            # nn.ReLU(),
+        )
+        self.refine_cls_score = nn.Linear(1024, num_classes)
+        self.refine_obb_delta = nn.Linear(1024, 5) # Predict 5 delta values
+
+    def forward(self, images: torch.Tensor, targets: List[Dict[str, torch.Tensor]] = None):
+        # 1. Backbone + FPN
+        features = self.body(images)
+        # Need to extract features from correct intermediate layers for FPN
+        # Assuming features is a dict mapping layer name to output tensor
+        fpn_features = self.fpn(features) # List or Dict of features [P3, P4, P5, P6, P7]
+        fpn_features_list = list(fpn_features.values()) # Example if FPN returns dict
+
+        # 2. Generate Horizontal Anchors
+        # image_shapes = [(img.shape[2], img.shape[3]) for img in images] # Get H, W
+        # feature_map_shapes = [f.shape[2:] for f in fpn_features_list]
+        # anchors_horiz = self.anchor_generator(image_shapes, feature_map_shapes, device=images.device) # List of tensors per image
+        # Placeholder for anchors
+        batch_size = images.shape[0]
+        device = images.device
+        dummy_num_anchors = 1000 # Total anchors across all levels
+        anchors_horiz_flat = torch.rand(dummy_num_anchors, 4, device=device) * 256 # Dummy horizontal anchors (x1,y1,x2,y2)
+
+
+        # 3. Coarse Stage Prediction
+        coarse_cls_logits_list, coarse_obb_deltas_list = self.coarse_head(fpn_features_list)
+        # Flatten predictions across levels
+        coarse_cls_logits = torch.cat([level.view(batch_size, -1, self.num_classes) for level in coarse_cls_logits_list], dim=1)
+        coarse_obb_deltas = torch.cat([level.view(batch_size, -1, 5) for level in coarse_obb_deltas_list], dim=1)
+
+        # --- Training Path ---
+        if self.training:
+            assert targets is not None, "Targets must be provided during training"
+            # 4. Assign Targets (Coarse Stage)
+            # Use iou_horizontal_vs_obb_horizontal_bbox(anchors_horiz_flat, targets['obbs'])
+            # Get target_labels, target_obb_deltas_coarse for coarse stage
+            print("Placeholder: Coarse Target Assignment")
+            # Dummy targets
+            num_total_anchors = coarse_cls_logits.shape[1]
+            dummy_target_labels = torch.randint(0, self.num_classes, (batch_size, num_total_anchors), device=device)
+            dummy_target_obb_deltas_coarse = torch.randn(batch_size, num_total_anchors, 5, device=device)
+            # Also need matched ground truth obbs for loss calculation
+            dummy_matched_gt_obbs_coarse = torch.rand(batch_size, num_total_anchors, 5, device=device) * 256
+
+
+            # 5. Decode Coarse Predictions (Needed for FRM input)
+            # proposals_obb_coarse = decode_obb_deltas(anchors_horiz_flat.unsqueeze(0).expand(batch_size, -1, -1), coarse_obb_deltas) # [B, N_anchors, 5]
+            # Select top proposals based on score or keep all? Paper unclear. Let's assume we refine based on positive anchors.
+            # Select positive coarse proposals for refinement
+            positive_coarse_indices = (dummy_target_labels > 0).nonzero(as_tuple=False) # Example selection
+            batch_idx = positive_coarse_indices[:, 0]
+            proposal_idx = positive_coarse_indices[:, 1]
+
+            # Get the corresponding coarse OBB predictions and deltas for positive proposals
+            proposals_obb_coarse_pos = decode_obb_deltas(anchors_horiz_flat[proposal_idx], coarse_obb_deltas[batch_idx, proposal_idx])
+            # Need batch indices for FRM/RoIAlign
+            proposals_batch_indices = batch_idx
+
+            # 6. Feature Refinement Module (FRM)
+            # Assume FRM uses P3 features
+            # Need to handle multiple proposals per image correctly
+            refined_roi_features = self.frm(fpn_features_list[0], proposals_obb_coarse_pos, proposals_batch_indices) # Shape [N_pos_proposals, C, H_roi, W_roi]
+
+            # Pool and flatten FRM features
+            pooled_features = F.adaptive_avg_pool2d(refined_roi_features, (1, 1)).view(refined_roi_features.size(0), -1)
+
+
+            # 7. Refine Stage Prediction (on positive coarse proposals)
+            shared_fc_features = self.refine_fc(pooled_features)
+            refine_cls_logits = self.refine_cls_score(shared_fc_features) # [N_pos_proposals, num_classes]
+            refine_obb_deltas = self.refine_obb_delta(shared_fc_features) # [N_pos_proposals, 5]
+
+
+            # 8. Assign Targets (Refine Stage)
+            # Use skew_iou(proposals_obb_coarse_pos, targets['obbs'])
+            # Get target_labels_refine, target_obb_deltas_refine for positive coarse proposals
+            print("Placeholder: Refine Target Assignment")
+            # Dummy targets for refinement stage
+            dummy_target_labels_refine = torch.randint(0, self.num_classes, (refine_cls_logits.shape[0],), device=device)
+            dummy_target_obb_deltas_refine = torch.randn_like(refine_obb_deltas)
+            # Also need matched ground truth obbs for loss calculation
+            dummy_matched_gt_obbs_refine = torch.rand_like(proposals_obb_coarse_pos) * 256
+
+
+            # 9. Calculate Loss (using WDFLoss class - defined below)
+            loss_dict = self.compute_loss(
+                coarse_cls_logits, coarse_obb_deltas, dummy_target_labels, dummy_target_obb_deltas_coarse, dummy_matched_gt_obbs_coarse, # Coarse targets
+                refine_cls_logits, refine_obb_deltas, dummy_target_labels_refine, dummy_target_obb_deltas_refine, proposals_obb_coarse_pos, dummy_matched_gt_obbs_refine, # Refine targets
+                positive_coarse_indices # To map refine preds back to all anchors if needed
+            )
+            return loss_dict
+
+        # --- Inference Path ---
+        else:
+            # 4. Decode Coarse Predictions
+            proposals_obb_coarse = decode_obb_deltas(anchors_horiz_flat.unsqueeze(0).expand(batch_size, -1, -1), coarse_obb_deltas)
+            proposals_scores_coarse = torch.sigmoid(coarse_cls_logits) # Or softmax
+
+            # Select top-k proposals per image based on coarse scores (e.g., top 1000)
+            # This filtering is important for efficiency
+            print("Placeholder: Selecting top-k coarse proposals")
+            # Dummy selection: take first N proposals
+            num_proposals_per_image = 200
+            top_proposals_obb_coarse = proposals_obb_coarse[:, :num_proposals_per_image, :]
+            top_proposals_scores_coarse = proposals_scores_coarse[:, :num_proposals_per_image, :]
+            # Need to create batch indices for these proposals
+            proposals_batch_indices = torch.arange(batch_size, device=device).repeat_interleave(num_proposals_per_image)
+            top_proposals_obb_coarse_flat = top_proposals_obb_coarse.view(-1, 5)
+
+
+            # 5. Feature Refinement Module (FRM) on top proposals
+            refined_roi_features = self.frm(fpn_features_list[0], top_proposals_obb_coarse_flat, proposals_batch_indices)
+            pooled_features = F.adaptive_avg_pool2d(refined_roi_features, (1, 1)).view(refined_roi_features.size(0), -1)
+
+
+            # 6. Refine Stage Prediction
+            shared_fc_features = self.refine_fc(pooled_features)
+            refine_cls_logits = self.refine_cls_score(shared_fc_features)
+            refine_obb_deltas = self.refine_obb_delta(shared_fc_features)
+
+            # 7. Decode Refine Predictions
+            # Refine the coarse OBB proposals using the refine deltas
+            final_pred_obbs = decode_obb_deltas(top_proposals_obb_coarse_flat, refine_obb_deltas)
+            final_pred_scores = torch.sigmoid(refine_cls_logits) # Or softmax
+
+            # Reshape back to per-image list
+            # Process final_pred_obbs and final_pred_scores per image...
+            results = []
+            start_idx = 0
+            for i in range(batch_size):
+                end_idx = start_idx + num_proposals_per_image
+                img_obbs = final_pred_obbs[start_idx:end_idx]
+                img_scores = final_pred_scores[start_idx:end_idx]
+
+                # Filter based on score threshold
+                # Apply oriented NMS (obb_nms) per class
+                print("Placeholder: Postprocessing - Score Thresholding and OBB NMS")
+                # Dummy result: just keep everything above a threshold
+                keep = img_scores.max(dim=1)[0] > 0.1 # Example threshold
+                final_boxes = img_obbs[keep]
+                final_scores = img_scores[keep].max(dim=1)[0]
+                final_labels = img_scores[keep].argmax(dim=1)
+
+                results.append({
+                    "boxes": final_boxes,
+                    "scores": final_scores,
+                    "labels": final_labels,
+                })
+                start_idx = end_idx
+
+            return results
+
+
+    def compute_loss(self, coarse_cls_logits, coarse_obb_deltas, target_labels_coarse, target_obb_deltas_coarse, matched_gt_obbs_coarse,
+                     refine_cls_logits, refine_obb_deltas, target_labels_refine, target_obb_deltas_refine, proposals_obb_refine, matched_gt_obbs_refine,
+                     positive_coarse_indices):
+        """Calculates the combined loss."""
+        print("Placeholder: compute_loss")
+        # Needs implementation of Focal Loss and the custom OBB regression loss (Eq 6.4)
+        # Calculate coarse cls loss (Focal Loss on coarse_cls_logits vs target_labels_coarse)
+        # Calculate coarse reg loss (Custom Loss on coarse_obb_deltas vs target_obb_deltas_coarse, using matched_gt_obbs_coarse)
+        # Calculate refine cls loss (Focal Loss on refine_cls_logits vs target_labels_refine)
+        # Calculate refine reg loss (Custom Loss on refine_obb_deltas vs target_obb_deltas_refine, using matched_gt_obbs_refine and proposals_obb_refine)
+
+        # Dummy losses
+        loss_cls_coarse = F.cross_entropy(coarse_cls_logits.view(-1, self.num_classes), target_labels_coarse.view(-1), reduction='mean')
+        loss_obb_coarse = F.smooth_l1_loss(coarse_obb_deltas, target_obb_deltas_coarse, reduction='mean') # Placeholder using SmoothL1
+        loss_cls_refine = F.cross_entropy(refine_cls_logits, target_labels_refine, reduction='mean')
+        loss_obb_refine = F.smooth_l1_loss(refine_obb_deltas, target_obb_deltas_refine, reduction='mean') # Placeholder using SmoothL1
+
+        total_loss = loss_cls_coarse + loss_obb_coarse + loss_cls_refine + loss_obb_refine
+        return {"total_loss": total_loss, "loss_cls_coarse": loss_cls_coarse, "loss_obb_coarse": loss_obb_coarse,
+                "loss_cls_refine": loss_cls_refine, "loss_obb_refine": loss_obb_refine}
+
+
+# --- Dataset Example (Conceptual) ---
+from torch.utils.data import Dataset, DataLoader
+# from PIL import Image
+# import xml.etree.ElementTree as ET # Or JSON parsing
+
+class PalmDiseaseOBBDataset(Dataset):
+    def __init__(self, img_dir, ann_dir, transforms=None):
+        self.img_dir = img_dir
+        self.ann_dir = ann_dir
+        self.transforms = transforms
+        # self.image_files = sorted(os.listdir(img_dir))
+        # Load annotations, map image files to annotations
+        self.annotations = self._load_annotations() # List of dicts [{image_path: ..., obbs: [[cx,cy,w,h,th],...], labels: [l1,...]}, ...]
+        print(f"Loaded {len(self.annotations)} annotations.")
+
+
+    def _load_annotations(self):
+        # Implement parsing of your XML/JSON annotation files
+        # For each image, extract file path, and lists of OBBs and labels
+        print("Placeholder: _load_annotations")
+        # Dummy data
+        dummy_annotations = []
+        for i in range(100): # 100 dummy images
+             num_boxes = torch.randint(1, 10, (1,)).item()
+             dummy_obbs = (torch.rand(num_boxes, 5) * torch.tensor([800, 600, 100, 150, 180])).tolist() # cx,cy,w,h,th in range
+             dummy_labels = torch.randint(1, 5, (num_boxes,)).tolist() # 4 disease classes + background=0
+             dummy_annotations.append({
+                 "image_path": f"dummy_image_{i}.jpg",
+                 "obbs": dummy_obbs,
+                 "labels": dummy_labels
+             })
+        return dummy_annotations
+
+    def __len__(self):
+        return len(self.annotations)
+
+    def __getitem__(self, idx):
+        ann = self.annotations[idx]
+        # img_path = os.path.join(self.img_dir, ann['image_path'])
+        # image = Image.open(img_path).convert("RGB")
+        # Dummy image
+        image = torch.rand(3, 600, 800) # H, W
+
+        obbs = torch.tensor(ann['obbs'], dtype=torch.float32)
+        labels = torch.tensor(ann['labels'], dtype=torch.int64)
+
+        target = {"boxes": obbs, "labels": labels} # Using 'boxes' key for consistency, but content is OBBs
+
+        if self.transforms:
+            # Apply transformations to image AND bounding boxes
+            # Note: Augmenting OBBs requires geometric transformations
+            print("Placeholder: Applying transforms to image and OBBs")
+            # image, target = self.transforms(image, target)
+            pass
+
+        return image, target
+
+# --- Usage Example (Conceptual) ---
+if __name__ == '__main__':
+    NUM_CLASSES = 5 # 4 diseases + 1 background
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # 1. Dataset and DataLoader
+    # palm_dataset = PalmDiseaseOBBDataset(img_dir='path/to/images', ann_dir='path/to/annotations', transforms=get_transforms())
+    # data_loader = DataLoader(palm_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn) # Need a custom collate_fn
+
+    # 2. Model
+    # ** Pass appropriate scales and aspect ratios for palm diseases **
+    palm_scales = [16, 32, 64, 128, 256, 512] # Example
+    palm_ratios = [0.3, 0.5, 1.0, 2.0, 3.0]   # Example
+    model = WDFNetPalm(num_classes=NUM_CLASSES, scales=palm_scales, aspect_ratios=palm_ratios).to(DEVICE)
+    model.train()
+
+    # 3. Optimizer
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.0025, momentum=0.9, weight_decay=0.0001)
+
+    # --- Dummy Training Loop ---
+    print("\n--- Conceptual Training Loop ---")
+    # Dummy input
+    dummy_images = torch.rand(2, 3, 600, 800).to(DEVICE) # Batch of 2 images
+    # Dummy targets (list of dicts per image)
+    dummy_targets = [
+        {"boxes": (torch.rand(5, 5)*torch.tensor([800,600,100,150,180])).to(DEVICE), "labels": torch.randint(1, NUM_CLASSES, (5,), device=DEVICE)},
+        {"boxes": (torch.rand(3, 5)*torch.tensor([800,600,100,150,180])).to(DEVICE), "labels": torch.randint(1, NUM_CLASSES, (3,), device=DEVICE)}
+    ]
+
+    for epoch in range(2): # Dummy epochs
+        optimizer.zero_grad()
+        loss_dict = model(dummy_images, dummy_targets)
+        total_loss = loss_dict['total_loss']
+        print(f"Epoch {epoch}, Loss: {total_loss.item()}")
+        total_loss.backward()
+        optimizer.step()
+
+    # --- Dummy Inference ---
+    print("\n--- Conceptual Inference ---")
+    model.eval()
+    with torch.no_grad():
+        dummy_inference_image = torch.rand(1, 3, 600, 800).to(DEVICE)
+        results = model(dummy_inference_image)
+        print("Inference Results (Image 0):")
+        if results:
+             print(f"  Detected {len(results[0]['boxes'])} objects.")
+             # print(results[0]['boxes'])
+             # print(results[0]['scores'])
+             # print(results[0]['labels'])
+        else:
+            print(" No objects detected (or error in dummy inference).")
